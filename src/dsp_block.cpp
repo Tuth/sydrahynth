@@ -1,6 +1,7 @@
 #include "dsp_block.h"
 
 #include <chrono>
+#include <cstdlib>
 
 #include <algorithm>
 
@@ -11,6 +12,7 @@
 namespace hydra {
 
 DspBlock::DspBlock() : shared_(dsp::DspCore::kSharedWords), spareMailboxes_(0x300), ports_(kPortWords) {
+    diagnostics = std::getenv("HYDRA_DSP_DIAGNOSTICS") != nullptr;
     for (int i = 0; i < kCores; ++i) {
         Core& c = cores_[i];
         c.dsp = std::make_unique<dsp::DspCore>(
@@ -43,8 +45,9 @@ void DspBlock::setThreads(int threads) {
     stopWorkers();
     threads_ = threads;
     quit_ = false;
+    const auto seen = generation_.load(std::memory_order_relaxed);
     for (int t = 1; t < threads_; ++t)
-        workers_.emplace_back([this, t] { workerLoop(t); });
+        workers_.emplace_back([this, t, seen] { workerLoop(t, seen); });
 }
 
 void DspBlock::stopWorkers() {
@@ -65,8 +68,7 @@ std::uint64_t DspBlock::runCores(int thread) {
     return executed;
 }
 
-void DspBlock::workerLoop(int thread) {
-    std::uint64_t seen = generation_.load(std::memory_order_acquire);
+void DspBlock::workerLoop(int thread, std::uint64_t seen) {
     for (;;) {
         // Spin while samples come quickly; sleep when the DSP side pauses.
         for (int spins = 0; generation_.load(std::memory_order_acquire) == seen; ++spins) {
@@ -81,7 +83,7 @@ void DspBlock::workerLoop(int thread) {
         seen = generation_.load(std::memory_order_acquire);
         if (quit_)
             return;
-        workerExecuted_.fetch_add(runCores(thread), std::memory_order_relaxed);
+        workerResults_[thread].executed = runCores(thread);
         finished_.fetch_add(1, std::memory_order_release);
     }
 }
@@ -114,6 +116,7 @@ void DspBlock::write(std::uint32_t offset, std::uint32_t value, int) {
         *w = value;
     if (offset < 0x20000)
         cores_[offset >> 14].dsp->invalidate(offset >> 2);
+    if (!diagnostics) return;
     ++cpuWrites_[offset & ~0xFFu];
     if (offset >= 0x7FC00 && offset < 0x80000 && (offset & 0x7F) == 0 && value != 0 && value != 0x55AA)
         ++commands_[{static_cast<int>((~offset >> 7) & 0x1F), value}];
@@ -187,7 +190,10 @@ void DspBlock::advanceToSample(std::uint64_t target) {
             if (profileSync)
                 syncNs += static_cast<std::uint64_t>(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart).count());
-            executed_ += workerExecuted_.exchange(0, std::memory_order_relaxed);
+            // The acquire of finished_ observes the release sequence from all
+            // workers. Each result has one writer and is read after completion.
+            for (int t = 1; t < threads_; ++t)
+                executed_ += workerResults_[t].executed;
         }
         ++sample_;
         if ((sample_ & 0x1F) == 0 && onBlock)

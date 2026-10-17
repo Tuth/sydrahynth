@@ -95,6 +95,13 @@ add_executable(firmware_smoke tools/firmware_smoke.cpp)
 target_link_libraries(firmware_smoke PRIVATE hydra_core)
 hydra_warnings(firmware_smoke)
 
+add_executable(firmware_perf tools/firmware_perf.cpp)
+target_link_libraries(firmware_perf PRIVATE hydra_core)
+hydra_warnings(firmware_perf)
+
+add_executable(dsp_sync_bench tools/dsp_sync_bench.cpp)
+target_link_libraries(dsp_sync_bench PRIVATE hydra_core)
+
 # The plugin (needs JUCE in external/JUCE: scripts/fetch-deps.sh).
 option(HYDRA_BUILD_PLUGIN "Build the VST3/LV2/standalone plugin" ON)
 if(HYDRA_BUILD_PLUGIN AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/JUCE/CMakeLists.txt")
@@ -164,6 +171,10 @@ endif()
 
 # Exercises the generated-code ABI and exact portable DSP arithmetic.
 if(BUILD_TESTING)
+    add_executable(dsp_workers_test tests/dsp_workers_test.cpp)
+    target_link_libraries(dsp_workers_test PRIVATE hydra_core)
+    add_test(NAME dsp_workers_test COMMAND dsp_workers_test)
+    set_tests_properties(dsp_workers_test PROPERTIES TIMEOUT 60)
     add_executable(dsp_port_test tests/dsp_port_test.cpp)
     target_link_libraries(dsp_port_test PRIVATE hydra_core)
     add_test(NAME dsp_port_test COMMAND dsp_port_test)

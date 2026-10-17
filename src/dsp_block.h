@@ -61,8 +61,9 @@ public:
     std::uint32_t portRead(int, std::uint32_t port) override { return ports_[port % kPortWords]; }
     void portWrite(int core, std::uint32_t port, std::uint32_t value) override {
         ports_[port % kPortWords] = value;
-        ++portWrites_[core][port];
+        if (diagnostics) ++portWrites_[core][port];
     }
+    bool diagnostics = false;  // opt-in counters, not needed for audio
     std::array<std::map<std::uint32_t, std::uint64_t>, 8> portWrites_;  // diagnostic: per core, port -> writes
     std::map<std::pair<int, std::uint32_t>, std::uint64_t> commands_;    // diagnostic: (core, command) from the CPU
     std::map<std::uint32_t, std::uint64_t> cpuWrites_;                   // diagnostic: CPU writes per 256-byte block
@@ -110,15 +111,16 @@ private:
 
     // Runs the cores assigned to `thread` for one sample; returns instructions.
     std::uint64_t runCores(int thread);
-    void workerLoop(int thread);
+    void workerLoop(int thread, std::uint64_t seen);
     void stopWorkers();
 
     std::array<Core, kCores> cores_;
     int threads_ = 1;
     std::vector<std::thread> workers_;
-    std::atomic<std::uint64_t> generation_{0};  // bumped to release the workers for a sample
-    std::atomic<int> finished_{0};              // workers done with the current sample
-    std::atomic<std::uint64_t> workerExecuted_{0};
+    alignas(64) std::atomic<std::uint64_t> generation_{0};  // bumped to release the workers for a sample
+    alignas(64) std::atomic<int> finished_{0};              // workers done with the current sample
+    struct alignas(64) WorkerResult { std::uint64_t executed = 0; };
+    std::array<WorkerResult, kCores> workerResults_{};
     std::atomic<bool> quit_{false};
     std::vector<std::uint32_t> shared_;
     std::vector<std::uint32_t> spareMailboxes_;

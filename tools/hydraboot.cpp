@@ -280,6 +280,7 @@ int main(int argc, char** argv) {
             std::printf("  %-14s v%-4s %8zu bytes\n", section.name.c_str(), section.version.c_str(), section.data.size());
 
         Machine machine(firmware, config);
+        machine.dspBlock().diagnostics = true;
         const bool panelLog = std::getenv("HYDRA_PANEL_LOG") != nullptr;
         machine.panel().bus().log().all = panelLog;
 
