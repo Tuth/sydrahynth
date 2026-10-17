@@ -44,6 +44,7 @@ public:
     // Waits until every pushed sample has been processed and every queued I2C
     // access applied.
     void flush();
+    void setHostIdle(bool idle) { hostIdle_.store(idle, std::memory_order_relaxed); }
     // Diagnostic: flushes so far, wall ns spent waiting in them, and samples
     // the worker was behind when they started (summed).
     std::uint64_t flushes = 0, flushNs = 0, flushBacklog = 0;
@@ -52,6 +53,7 @@ public:
     std::atomic<bool> enabled{true};
 
 private:
+    std::atomic<bool> hostIdle_{false};
     struct Sample {
         std::uint32_t dryLeft, dryRight, a4, a5, b4, b5;
     };

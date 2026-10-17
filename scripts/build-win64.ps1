@@ -12,7 +12,7 @@ try {
     if ($LASTEXITCODE) { throw 'Dependency fetch failed' }
     cmake -S . -B build/win64 -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DDYNARMIC_USE_PRECOMPILED_HEADERS=OFF
     if ($LASTEXITCODE) { throw 'CMake configure failed' }
-    cmake --build build/win64 --parallel $Jobs --target Sydrahynth_VST3 Sydrahynth_Standalone dsp_port_test firmware_smoke
+    cmake --build build/win64 --parallel $Jobs --target Sydrahynth_VST3 Sydrahynth_Standalone dsp_port_test dsp_workers_test firmware_smoke firmware_perf dsp_sync_bench
     if ($LASTEXITCODE) { throw 'Build failed' }
     ctest --test-dir build/win64 --output-on-failure
     if ($LASTEXITCODE) { throw 'Tests failed' }

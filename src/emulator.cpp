@@ -447,6 +447,7 @@ void Emulator::threadMain() {
 
         if (state_.load(std::memory_order_relaxed) == State::Running && !uploading_.load(std::memory_order_relaxed) &&
             bufferedFrames() >= targetFill_.load(std::memory_order_relaxed)) {
+            machine_->setHostIdle(true);
             std::this_thread::sleep_for(std::chrono::microseconds(500));
             continue;
         }
@@ -459,6 +460,7 @@ void Emulator::threadMain() {
             if (!control.empty())
                 machine_->sendMidi(control);
         }
+        machine_->setHostIdle(false);
         deliverMidi();
         stepUpload();
         applyPanelInput();

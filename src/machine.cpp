@@ -11,10 +11,6 @@
 #include <stdexcept>
 #include <utility>
 
-#if defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#endif
-
 namespace hydra {
 
 namespace {
@@ -495,17 +491,9 @@ void Machine::waitDsp() {
     if (dspReached_.load(std::memory_order_acquire) >= target)
         return;
     const ScopedTime t(profile_.enabled, profile_.dspWait);
-    unsigned spins = 0;
-    while (dspReached_.load(std::memory_order_acquire) < target) {
-        if (spins < 4096) {
-#if defined(__x86_64__) || defined(_M_X64)
-            _mm_pause();
-#endif
-            ++spins;
-        } else {
+    for (int spins = 0; dspReached_.load(std::memory_order_acquire) < target; ++spins)
+        if (spins > 4096)
             std::this_thread::yield();
-        }
-    }
 }
 
 void Machine::dspThreadLoop() {
@@ -515,14 +503,8 @@ void Machine::dspThreadLoop() {
         if (target <= reached) {
             // Spin briefly (requests come every few microseconds while running),
             // then sleep until the next request, e.g. while the emulator pauses.
-            if (spins < 4096) {
-#if defined(__x86_64__) || defined(_M_X64)
-                _mm_pause();
-#endif
-                ++spins;
-            } else {
+            if (++spins > 4096 || hostIdle_.load(std::memory_order_relaxed))
                 dspRequested_.wait(target, std::memory_order_acquire);
-            }
             continue;
         }
         spins = 0;

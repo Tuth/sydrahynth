@@ -14,6 +14,7 @@ int main() {
     program(serial);program(workers);
     for(unsigned step=1;step<=80;++step) {
         workers.setThreads(1+(step%8)); // deliberately no startup sleep
+        workers.setHostIdle(step%2); // a hint must never suppress pending work
         const auto sample=step*17;
         serial.advanceToSample(sample);workers.advanceToSample(sample);
         if(serial.instructionsExecuted()!=workers.instructionsExecuted()) return 1;

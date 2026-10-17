@@ -10,12 +10,27 @@ import zipfile
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--build', type=Path, default=root/'build/win64')
-parser.add_argument('--output', type=Path, default=root/'build/Sydrahynth-Win64-test2.zip')
+parser.add_argument('--output', type=Path, default=root/'build/Sydrahynth-Win64-test3.zip')
+parser.add_argument('--source-manifest', type=Path, help='Verified Git tree manifest: revision and files (path/sha).')
+parser.add_argument('--baseline-benchmark', type=Path, help='Test2 firmware_perf.exe for optional native A/B testing.')
 args = parser.parse_args()
 def git(*a):
     return subprocess.check_output(['git','-C',str(root),*a], text=True).strip()
-if git('status','--porcelain'):
-    raise SystemExit('Commit the source changes before packaging; the binary must match the source snapshot.')
+if args.source_manifest:
+    manifest=json.loads(args.source_manifest.read_text())
+    revision=manifest['revision']
+    source_files=[item['path'] for item in manifest['files']]
+    for item in manifest['files']:
+        path=Path(item['path'])
+        if path.is_absolute() or '..' in path.parts: raise SystemExit('Invalid source path')
+        data=(root/path).read_bytes()
+        digest=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+        if digest!=item['sha']: raise SystemExit('Source differs from published Git tree: '+str(path))
+else:
+    if git('status','--porcelain'):
+        raise SystemExit('Commit the source changes before packaging; the binary must match the source snapshot.')
+    revision=git('rev-parse','HEAD')
+    source_files=git('ls-files').splitlines()
 product = args.build/'Sydrahynth_artefacts/Release'
 exe = product/'Standalone/Sydrahynth.exe'
 vst = product/'VST3/Sydrahynth.vst3'
@@ -24,10 +39,15 @@ if not exe.is_file() or not list(vst.rglob('*.vst3')):
 files = { 'Standalone/Sydrahynth.exe': exe }
 for p in vst.rglob('*'):
     if p.is_file(): files['VST3/Sydrahynth.vst3/'+p.relative_to(vst).as_posix()] = p
-for name in ('emurun','dsp_port_test','firmware_smoke'):
+for name in ('emurun','dsp_port_test','dsp_workers_test','firmware_smoke','dsp_sync_bench'):
     p=args.build/(name+'.exe')
     if p.exists(): files['Tools/'+p.name]=p
-for name in git('ls-files').splitlines(): files['Source/'+name]=root/name
+p=args.build/'firmware_perf.exe'
+if p.is_file(): files['Tools/Test3/firmware_perf.exe']=p
+if args.baseline_benchmark:
+    files['Tools/Test2/firmware_perf.exe']=args.baseline_benchmark
+files['Scripts/Test-Performance.ps1']=root/'scripts/Test-Performance.ps1'
+for name in source_files: files['Source/'+name]=root/name
 licenses={
     'Sydrahynth':root/'LICENSE',
     'JUCE':root/'external/JUCE/LICENSE.md',
@@ -50,14 +70,14 @@ for name,p in licenses.items():
     if not p.is_file(): raise SystemExit(f'Missing license: {p}')
     files['Licenses/'+name+'.txt']=p
 info={
-    'source_revision':git('rev-parse','HEAD'),
+    'source_revision':revision,
     'upstream_base':'c23d935a30e21605299a9d8a79224d865193a447',
     'platform':'Windows x86-64 UCRT; LLVM-MinGW 20261006; Release; static C++ runtime',
     'firmware_included':False,
     'dependencies':{n:git('-C',str(root/'external'/n),'rev-parse','HEAD') for n in ('JUCE','dynarmic')},
     'sha256':{n:hashlib.sha256(p.read_bytes()).hexdigest() for n,p in files.items() if n.endswith(('.exe','.vst3'))},
 }
-readme='''Sydrahynth — Windows x64 test build 2
+readme='''Sydrahynth — Windows x64 test build 3 (experimental CPU work)
 
 VST3 + standalone. Hydrasynth Desktop firmware and banks are NOT included.
 
@@ -87,7 +107,8 @@ Source/ contains the port source and pinned open-source dependency-fetch/build
 scripts. All compatibility patches are included. Firmware/banks remain yours.
 License: AGPL-3.0-only; see Licenses/ and Source/THIRD_PARTY.md.
 '''
-validation=root/'WINDOWS_VALIDATION.md'
+readme += '\nTest3 performance changes and measured limits: Source/PERFORMANCE.md.\nOptional A/B: Scripts/Test-Performance.ps1 -Firmware your.dat -Bank your.hydra\nThe stable Test2 release remains the fallback. Test3 native Windows validation is pending.\n'
+validation=root/'PERFORMANCE.md'
 if not validation.exists(): raise SystemExit('Record the actual validation in WINDOWS_VALIDATION.md first.')
 args.output.parent.mkdir(parents=True,exist_ok=True)
 with zipfile.ZipFile(args.output,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as z:

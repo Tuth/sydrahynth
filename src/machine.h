@@ -134,6 +134,11 @@ public:
     // Queues MIDI bytes into the MIDI input (UART0).
     void sendMidi(std::initializer_list<std::uint8_t> bytes);
     void sendMidi(const std::vector<std::uint8_t>& bytes);
+    // The host has enough buffered audio; let idle workers sleep promptly.
+    void setHostIdle(bool idle) {
+        hostIdle_.store(idle, std::memory_order_relaxed);
+        dsp_->setHostIdle(idle); effects_->setHostIdle(idle);
+    }
     DspBlock& dspBlock() { return *dsp_; }
     Memory& memory() { return memory_; }
     A5Gpio& gpio() { return *gpio_; }
@@ -219,6 +224,7 @@ private:
     bool dspAsync_ = false;
     std::thread dspThread_;
     std::atomic<std::uint64_t> dspRequested_{0}, dspReached_{0};
+    std::atomic<bool> hostIdle_{false};
     std::atomic<bool> dspQuit_{false};
     std::atomic<std::uint32_t> dspIrq15_{0}, dspIrq14_{0};  // raised by the DSP side, delivered by the CPU side
     std::unique_ptr<CpuCore> cpu_;

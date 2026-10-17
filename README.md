@@ -6,6 +6,13 @@ Sydrahynth is a Linux and Windows x64 plugin that emulates ASM's Hydrasynth Desk
 Hydrasynth Desktop firmware on an emulated main board. No firmware is included:
 you supply `Hydrasynth_Desktop_Firmware_2.2.0.dat` from ASM's firmware pack.
 
+## Experimental Test3 CPU work
+
+The `perf/win64-test3` branch keeps four DSP workers and the existing audio buffering.
+It parks waiting workers promptly only at the existing host-buffer wait, makes costly
+DSP map diagnostics opt-in, and fixes worker startup synchronization. Native Windows
+Test3 performance and audio validation remain pending. See [PERFORMANCE.md](PERFORMANCE.md).
+
 ## Build
 
     scripts/fetch-deps.sh

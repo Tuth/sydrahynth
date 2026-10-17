@@ -160,7 +160,7 @@ void EffectsRack::workerLoop() {
                 return pushed_.load(std::memory_order_acquire) != next || quit_.load(std::memory_order_relaxed) ||
                        flushRequested_.load(std::memory_order_acquire);
             };
-            for (int spins = 0; spins < 1024 && !ready(); ++spins) {
+            for (int spins = 0; spins < 1024 && !hostIdle_.load(std::memory_order_relaxed) && !ready(); ++spins) {
 #if (defined(__x86_64__) || defined(_M_X64)) || defined(__i386__)
                 _mm_pause();
 #endif

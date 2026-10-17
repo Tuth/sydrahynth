@@ -72,7 +72,7 @@ void DspBlock::workerLoop(int thread, std::uint64_t seen) {
     for (;;) {
         // Spin while samples come quickly; sleep when the DSP side pauses.
         for (int spins = 0; generation_.load(std::memory_order_acquire) == seen; ++spins) {
-            if (spins < 8192) {
+            if (spins < 8192 && !hostIdle_.load(std::memory_order_relaxed)) {
 #if (defined(__x86_64__) || defined(_M_X64)) || defined(__i386__)
                 _mm_pause();
 #endif
@@ -83,7 +83,7 @@ void DspBlock::workerLoop(int thread, std::uint64_t seen) {
         seen = generation_.load(std::memory_order_acquire);
         if (quit_)
             return;
-        workerResults_[thread].executed = runCores(thread);
+        workerExecuted_.fetch_add(runCores(thread), std::memory_order_relaxed);
         finished_.fetch_add(1, std::memory_order_release);
     }
 }
@@ -190,10 +190,7 @@ void DspBlock::advanceToSample(std::uint64_t target) {
             if (profileSync)
                 syncNs += static_cast<std::uint64_t>(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart).count());
-            // The acquire of finished_ observes the release sequence from all
-            // workers. Each result has one writer and is read after completion.
-            for (int t = 1; t < threads_; ++t)
-                executed_ += workerResults_[t].executed;
+            executed_ += workerExecuted_.exchange(0, std::memory_order_relaxed);
         }
         ++sample_;
         if ((sample_ & 0x1F) == 0 && onBlock)
