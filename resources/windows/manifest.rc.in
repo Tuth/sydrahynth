@@ -1,0 +1,2 @@
+#include <windows.h>
+@HYDRA_MANIFEST_ID@ RT_MANIFEST "@HYDRA_MANIFEST_FILE@"

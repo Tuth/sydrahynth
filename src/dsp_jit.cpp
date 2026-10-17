@@ -28,18 +28,19 @@ std::int32_t offsetIn(const DspCore& core, const T& member) {
 }
 }  // namespace
 
-// Entry points for compiled code (System V: core in rdi, arguments in esi, edx).
+// Host thunks use the platform ABI. The emitted code uses rdi/esi/edx
+// internally; emitCall bridges these to rcx/edx/r8d on Windows.
 struct JitThunks {
-    static std::uint32_t step(DspCore* core) { return static_cast<std::uint32_t>(core->interpret(2, 1)); }
-    static std::uint32_t idle(DspCore* core, std::uint32_t target) { return core->branchIdle(target) ? 1 : 0; }
-    static std::uint32_t dataRegRead(DspCore* core, std::uint32_t address) {
+    static std::uint32_t HYDRA_JIT_HOST_ABI step(DspCore* core) { return static_cast<std::uint32_t>(core->interpret(2, 1)); }
+    static std::uint32_t HYDRA_JIT_HOST_ABI idle(DspCore* core, std::uint32_t target) { return core->branchIdle(target) ? 1 : 0; }
+    static std::uint32_t HYDRA_JIT_HOST_ABI dataRegRead(DspCore* core, std::uint32_t address) {
         return core->host_.dataRegRead(core->id_, address);
     }
-    static void dataRegWrite(DspCore* core, std::uint32_t address, std::uint32_t value) {
+    static void HYDRA_JIT_HOST_ABI dataRegWrite(DspCore* core, std::uint32_t address, std::uint32_t value) {
         core->host_.dataRegWrite(core->id_, address, value);
     }
-    static std::uint32_t ioRead(DspCore* core, std::uint32_t address) { return core->host_.ioRead(core->id_, address); }
-    static void ioWrite(DspCore* core, std::uint32_t address, std::uint32_t value) {
+    static std::uint32_t HYDRA_JIT_HOST_ABI ioRead(DspCore* core, std::uint32_t address) { return core->host_.ioRead(core->id_, address); }
+    static void HYDRA_JIT_HOST_ABI ioWrite(DspCore* core, std::uint32_t address, std::uint32_t value) {
         core->host_.ioWrite(core->id_, address, value);
     }
 };
@@ -63,7 +64,16 @@ void DspJit::flushAll() {
 
 void DspJit::emitCall(const void* function) {
     mov(rax, reinterpret_cast<std::uint64_t>(function));
+#if defined(_WIN32) || defined(HYDRA_TEST_WINDOWS_ABI)
+    mov(r8d, edx);
+    mov(edx, esi);
+    mov(rcx, rdi);
+    sub(rsp, 32);  // mandatory Windows x64 caller-owned shadow space
     call(rax);
+    add(rsp, 32);
+#else
+    call(rax);
+#endif
 }
 
 void DspJit::emitCommon() {
@@ -75,6 +85,17 @@ void DspJit::emitCommon() {
     push(r13);
     push(r14);
     push(r15);
+#if defined(_WIN32) || defined(HYDRA_TEST_WINDOWS_ABI)
+    push(rdi);
+    push(rsi);  // these are nonvolatile on Windows, scratch in the JIT
+    push(r8);   // &executed; nine pushes keep rsp 16-byte aligned
+    mov(rbx, rcx);
+    mov(r12, qword[r8]);
+    mov(r13, r9);
+    lea(r14, ptr[rcx + regsOffset_]);
+    mov(r15, reinterpret_cast<std::uint64_t>(core_.mem_.data));
+    jmp(rdx);
+#else
     push(rdx);  // seven pushes: rsp is 16-byte aligned for calls from here on
     mov(rbx, rdi);
     mov(r12, qword[rdx]);
@@ -82,10 +103,15 @@ void DspJit::emitCommon() {
     lea(r14, ptr[rdi + regsOffset_]);
     mov(r15, reinterpret_cast<std::uint64_t>(core_.mem_.data));
     jmp(rsi);
+#endif
 
     exitCommon_ = getCurr();
     pop(rdx);
     mov(qword[rdx], r12);
+#if defined(_WIN32) || defined(HYDRA_TEST_WINDOWS_ABI)
+    pop(rsi);
+    pop(rdi);
+#endif
     pop(r15);
     pop(r14);
     pop(r13);

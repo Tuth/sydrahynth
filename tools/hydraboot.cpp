@@ -72,13 +72,20 @@ using namespace hydra;
 // tools/symbolize_samples.py turns that into a per-function profile.
 #include <csignal>
 #include <ctime>
+#if defined(__linux__)
 #include <sys/syscall.h>
 #include <sys/time.h>
-#include <x86intrin.h>
 #include <ucontext.h>
 #include <unistd.h>
+#endif
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
 
 namespace {
+#if defined(__linux__)
 constexpr std::size_t kMaxSamples = 1 << 20;
 std::uintptr_t gSamples[kMaxSamples];
 std::atomic<std::size_t> gSampleCount{0};
@@ -130,6 +137,10 @@ void writeSamples(const char* path) {
         std::fprintf(f, "%lx\n", static_cast<unsigned long>(gSamples[i]));
     std::fclose(f);
 }
+#else
+void startSampler() { std::fprintf(stderr, "HYDRA_SAMPLE is available on Linux only; use a native Windows CPU profiler.\n"); }
+void writeSamples(const char*) {}
+#endif
 }  // namespace
 
 // Writes interleaved stereo samples (24-bit range, clamped) as a 44.1 kHz 24-bit WAV.

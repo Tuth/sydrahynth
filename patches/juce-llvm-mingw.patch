@@ -1,0 +1,126 @@
+diff --git a/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.cpp b/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.cpp
+index 13db4e3..d05bc63 100644
+--- a/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.cpp
++++ b/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.cpp
+@@ -32,6 +32,8 @@
+   ==============================================================================
+ */
+ 
++#include <nserror.h>  // NS_E_NO_MORE_SAMPLES (also required by mingw-w64)
++
+ namespace juce
+ {
+ 
+diff --git a/modules/juce_audio_plugin_client/juce_audio_plugin_client_VST3.cpp b/modules/juce_audio_plugin_client/juce_audio_plugin_client_VST3.cpp
+index 40d8a74..c37497a 100644
+--- a/modules/juce_audio_plugin_client/juce_audio_plugin_client_VST3.cpp
++++ b/modules/juce_audio_plugin_client/juce_audio_plugin_client_VST3.cpp
+@@ -32,6 +32,17 @@
+   ==============================================================================
+ */
+ 
++// VST3 SDK headers include windows.h before JUCE's native header. Match JUCE's
++// Windows 10 baseline before mingw-w64 selects its default Windows 7 API set.
++#if defined (__MINGW32__)
++ #ifndef WINVER
++  #define WINVER 0x0a00
++ #endif
++ #ifndef _WIN32_WINNT
++  #define _WIN32_WINNT 0x0a00
++ #endif
++#endif
++
+ #include <juce_core/system/juce_TargetPlatform.h>
+ #include <juce_core/system/juce_CompilerWarnings.h>
+ #include <juce_audio_processors_headless/format/juce_PluginFormatDefs.h>
+diff --git a/modules/juce_core/system/juce_TargetPlatform.h b/modules/juce_core/system/juce_TargetPlatform.h
+index 7850b4c..3138a4b 100644
+--- a/modules/juce_core/system/juce_TargetPlatform.h
++++ b/modules/juce_core/system/juce_TargetPlatform.h
+@@ -97,7 +97,7 @@
+ 
+ //==============================================================================
+ #if JUCE_WINDOWS
+-  #ifdef _MSC_VER
++  #if defined (_MSC_VER) || defined (__MINGW64__)
+     #ifdef _WIN64
+       #define JUCE_64BIT 1
+     #else
+@@ -109,7 +109,7 @@
+     #define JUCE_DEBUG 1
+   #endif
+ 
+-  #ifdef __MINGW32__
++  #if defined (__MINGW32__) && ! (defined (__clang__) && defined (_WIN64))
+     #error "MinGW is not supported. Please use an alternative compiler."
+   #endif
+ 
+diff --git a/modules/juce_graphics/native/juce_Direct2DImage_windows.cpp b/modules/juce_graphics/native/juce_Direct2DImage_windows.cpp
+index e1c9708..904ba14 100644
+--- a/modules/juce_graphics/native/juce_Direct2DImage_windows.cpp
++++ b/modules/juce_graphics/native/juce_Direct2DImage_windows.cpp
+@@ -957,6 +957,11 @@ void Direct2DPixelData::desaturateInArea (Rectangle<int> b)
+         }
+ 
+         effect->SetInput (0, input);
++       #if defined (__MINGW32__)
++        // Missing in mingw-w64 d2d1effects.h; SDK saturation property index is 0.
++        // https://learn.microsoft.com/windows/win32/api/d2d1effects/ne-d2d1effects-d2d1_saturation_prop
++        constexpr UINT32 D2D1_SATURATION_PROP_SATURATION = 0;
++       #endif
+         effect->SetValue (D2D1_SATURATION_PROP_SATURATION, 0.0f);
+         return effect;
+     });
+diff --git a/modules/juce_graphics/native/juce_DirectX_windows.cpp b/modules/juce_graphics/native/juce_DirectX_windows.cpp
+index ccbd6ca..fecb6f4 100644
+--- a/modules/juce_graphics/native/juce_DirectX_windows.cpp
++++ b/modules/juce_graphics/native/juce_DirectX_windows.cpp
+@@ -622,7 +622,7 @@ DxgiAdapter::Ptr Direct2DDeviceResources::findAdapter (const DxgiAdapters& adapt
+ 
+     ComSmartPtr<IDXGIDevice> device;
+     JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wlanguage-extension-token")
+-    surface->GetDevice (__uuidof (device), (void**) device.resetAndGetPointerAddress());
++    surface->GetDevice (__uuidof (IDXGIDevice), (void**) device.resetAndGetPointerAddress());
+     JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+ 
+     return findAdapter (adapters, device);
+diff --git a/modules/juce_gui_basics/native/accessibility/juce_UIATextProvider_windows.h b/modules/juce_gui_basics/native/accessibility/juce_UIATextProvider_windows.h
+index e2e6c14..8e80f6b 100644
+--- a/modules/juce_gui_basics/native/accessibility/juce_UIATextProvider_windows.h
++++ b/modules/juce_gui_basics/native/accessibility/juce_UIATextProvider_windows.h
+@@ -316,6 +316,13 @@ private:
+ 
+                     case UIA_CaretPositionAttributeId:
+                     {
++                       #if defined (__MINGW32__)
++                        // mingw-w64 omits CaretPosition. Values specified by Microsoft:
++                        // https://learn.microsoft.com/windows/win32/api/uiautomationcore/ne-uiautomationcore-caretposition
++                        constexpr int CaretPosition_Unknown = 0;
++                        constexpr int CaretPosition_EndOfLine = 1;
++                        constexpr int CaretPosition_BeginningOfLine = 2;
++                       #endif
+                         auto cursorPos = textInterface.getTextInsertionOffset();
+ 
+                         auto caretPos = [&]
+diff --git a/modules/juce_gui_basics/native/juce_Direct2DHwndContext_windows.cpp b/modules/juce_gui_basics/native/juce_Direct2DHwndContext_windows.cpp
+index 344e93c..b440d80 100644
+--- a/modules/juce_gui_basics/native/juce_Direct2DHwndContext_windows.cpp
++++ b/modules/juce_gui_basics/native/juce_Direct2DHwndContext_windows.cpp
+@@ -144,7 +144,7 @@ public:
+ 
+         ComSmartPtr<IDXGIDevice> device;
+         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wlanguage-extension-token")
+-        chain->GetDevice (__uuidof (device), (void**) device.resetAndGetPointerAddress());
++        chain->GetDevice (__uuidof (IDXGIDevice), (void**) device.resetAndGetPointerAddress());
+         JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+ 
+         createBuffer (Direct2DDeviceResources::findAdapter (directX->adapters, device));
+@@ -188,7 +188,7 @@ private:
+ 
+         ComSmartPtr<IDXGISurface> surface;
+         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wlanguage-extension-token")
+-        if (const auto hr = chain->GetBuffer (0, __uuidof (surface), reinterpret_cast<void**> (surface.resetAndGetPointerAddress())); FAILED (hr))
++        if (const auto hr = chain->GetBuffer (0, __uuidof (IDXGISurface), reinterpret_cast<void**> (surface.resetAndGetPointerAddress())); FAILED (hr))
+             return nullptr;
+         JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+ 

@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-#if defined(__x86_64__) || defined(__i386__)
+#if (defined(__x86_64__) || defined(_M_X64)) || defined(__i386__)
 #include <immintrin.h>
 #endif
 
@@ -26,7 +26,7 @@ template <typename Done>
 void waitUntil(Done done) {
     for (int spins = 0; !done(); ++spins) {
         if (spins < 4096) {
-#if defined(__x86_64__) || defined(__i386__)
+#if (defined(__x86_64__) || defined(_M_X64)) || defined(__i386__)
             _mm_pause();
 #endif
         } else {
@@ -71,7 +71,7 @@ void DspBlock::workerLoop(int thread) {
         // Spin while samples come quickly; sleep when the DSP side pauses.
         for (int spins = 0; generation_.load(std::memory_order_acquire) == seen; ++spins) {
             if (spins < 8192) {
-#if defined(__x86_64__) || defined(__i386__)
+#if (defined(__x86_64__) || defined(_M_X64)) || defined(__i386__)
                 _mm_pause();
 #endif
             } else {

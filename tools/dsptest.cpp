@@ -5,6 +5,10 @@
 //                    u8 op, a, b, c, shift, pad[3]; u32 operand; i32 offset
 //   dsptest run      test cases in (see readCase), results out (see writeResult)
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -119,6 +123,10 @@ int runMode() {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc < 2) {
         std::fprintf(stderr, "usage: %s decode|run\n", argv[0]);
         return 2;

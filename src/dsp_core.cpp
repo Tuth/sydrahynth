@@ -1,11 +1,13 @@
 #include "dsp_core.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <format>
 #include <iterator>
 #include <string_view>
 
 #include "dsp_jit.h"
+#include "dsp_math.h"
 
 namespace hydra::dsp {
 
@@ -14,17 +16,13 @@ namespace {
 std::int32_t s32(std::uint32_t v) { return static_cast<std::int32_t>(v); }
 
 std::uint32_t saturatingAdd(std::uint32_t a, std::uint32_t b) {
-    std::int32_t result;
-    if (__builtin_add_overflow(s32(a), s32(b), &result))
-        return s32(a) < 0 ? 0x80000000u : 0x7FFFFFFFu;
-    return static_cast<std::uint32_t>(result);
+    const auto result = static_cast<std::int64_t>(s32(a)) + s32(b);
+    return static_cast<std::uint32_t>(std::clamp(result, std::int64_t{-0x80000000LL}, std::int64_t{0x7FFFFFFF}));
 }
 
 std::uint32_t saturatingSub(std::uint32_t a, std::uint32_t b) {
-    std::int32_t result;
-    if (__builtin_sub_overflow(s32(a), s32(b), &result))
-        return s32(a) < 0 ? 0x80000000u : 0x7FFFFFFFu;
-    return static_cast<std::uint32_t>(result);
+    const auto result = static_cast<std::int64_t>(s32(a)) - s32(b);
+    return static_cast<std::uint32_t>(std::clamp(result, std::int64_t{-0x80000000LL}, std::int64_t{0x7FFFFFFF}));
 }
 
 std::uint32_t clampToS32(std::int64_t v) {
@@ -233,7 +231,7 @@ DspCore::DspCore(int id, Host& host, Memory memory) : id_(id), host_(host), mem_
 DspCore::~DspCore() = default;
 
 bool DspCore::jitByDefault() {
-#if defined(__x86_64__)
+#if (defined(__x86_64__) || defined(_M_X64))
     static const bool enabled = [] {
         const char* setting = std::getenv("HYDRA_DSP_JIT");
         return !setting || std::string_view(setting) != "0";
@@ -245,7 +243,7 @@ bool DspCore::jitByDefault() {
 }
 
 void DspCore::setJit(bool enabled) {
-#if defined(__x86_64__)
+#if (defined(__x86_64__) || defined(_M_X64))
     if (enabled && !jit_)
         jit_ = std::make_unique<DspJit>(*this);
     else if (!enabled)
@@ -369,6 +367,7 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
     // Threaded dispatch: every handler fetches the next instruction and jumps
     // to its handler itself (one indirect branch per handler predicts far
     // better than a shared switch).
+#if !defined(HYDRA_PORTABLE_DISPATCH) && (!defined(_MSC_VER) || defined(__clang__))
     static const void* const kHandlers[] = {
         &&op_Nop,
         &&op_Invalid,
@@ -452,7 +451,13 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
         &&op_NegSat,
         &&op_AbsSat,
     };
+#define HYDRA_DISPATCH_JUMP() goto *kHandlers[static_cast<int>(dp->op)]
+#else
+#define HYDRA_DISPATCH_JUMP() goto portable_dispatch
+#endif
+#if !defined(HYDRA_PORTABLE_DISPATCH) && (!defined(_MSC_VER) || defined(__clang__))
     static_assert(std::size(kHandlers) == static_cast<std::size_t>(Op::AbsSat) + 1);
+#endif
 
     std::uint64_t executed = 0;
     std::uint32_t pc = 0, next = 0, rb = 0;
@@ -488,7 +493,7 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
         pa = &r_[dp->a];                             \
         rb = r_[dp->b];                              \
         ++executed;                                  \
-        goto *kHandlers[static_cast<int>(dp->op)];   \
+        HYDRA_DISPATCH_JUMP();                      \
     } while (0)
 #define NEXT()      \
     do {            \
@@ -497,6 +502,93 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
     } while (0)
 
     DISPATCH();
+#if defined(HYDRA_PORTABLE_DISPATCH) || (defined(_MSC_VER) && !defined(__clang__))
+portable_dispatch:
+    switch(dp->op) {
+    case Op::Nop: goto op_Nop;
+    case Op::Invalid: goto op_Invalid;
+    case Op::AddEightMem: goto op_AddEightMem;
+    case Op::IoLoad: goto op_IoLoad;
+    case Op::IoStore: goto op_IoStore;
+    case Op::ExtLoad: goto op_ExtLoad;
+    case Op::ExtStore: goto op_ExtStore;
+    case Op::IoLoadIndexed: goto op_IoLoadIndexed;
+    case Op::IoStoreIndexed: goto op_IoStoreIndexed;
+    case Op::Load: goto op_Load;
+    case Op::Store: goto op_Store;
+    case Op::LoadIndexed: goto op_LoadIndexed;
+    case Op::StoreIndexed: goto op_StoreIndexed;
+    case Op::AddImm: goto op_AddImm;
+    case Op::SubImm: goto op_SubImm;
+    case Op::MovImm: goto op_MovImm;
+    case Op::AddImmLow: goto op_AddImmLow;
+    case Op::SubImmLow: goto op_SubImmLow;
+    case Op::MovImmLow: goto op_MovImmLow;
+    case Op::AndImmLow: goto op_AndImmLow;
+    case Op::OrImmLow: goto op_OrImmLow;
+    case Op::MovImmHigh: goto op_MovImmHigh;
+    case Op::AndImmHigh: goto op_AndImmHigh;
+    case Op::BranchGreater: goto op_BranchGreater;
+    case Op::BranchGreaterEqual: goto op_BranchGreaterEqual;
+    case Op::BranchEqual: goto op_BranchEqual;
+    case Op::BranchNotEqual: goto op_BranchNotEqual;
+    case Op::BranchHighEqualLow: goto op_BranchHighEqualLow;
+    case Op::BranchHighNotEqualLow: goto op_BranchHighNotEqualLow;
+    case Op::BranchLowEqual: goto op_BranchLowEqual;
+    case Op::BranchLowNotEqual: goto op_BranchLowNotEqual;
+    case Op::BranchBitSet: goto op_BranchBitSet;
+    case Op::BranchBitClear: goto op_BranchBitClear;
+    case Op::JumpIfZero: goto op_JumpIfZero;
+    case Op::JumpIfNotZero: goto op_JumpIfNotZero;
+    case Op::Loop: goto op_Loop;
+    case Op::Call: goto op_Call;
+    case Op::JumpLink: goto op_JumpLink;
+    case Op::Jump: goto op_Jump;
+    case Op::Return: goto op_Return;
+    case Op::JumpRegister: goto op_JumpRegister;
+    case Op::ReturnFromInterrupt: goto op_ReturnFromInterrupt;
+    case Op::Mul: goto op_Mul;
+    case Op::MulAcc: goto op_MulAcc;
+    case Op::MulMem: goto op_MulMem;
+    case Op::AddMem: goto op_AddMem;
+    case Op::AddMemSatStore: goto op_AddMemSatStore;
+    case Op::AddMemSat: goto op_AddMemSat;
+    case Op::SubMem: goto op_SubMem;
+    case Op::DelayRead: goto op_DelayRead;
+    case Op::DelayWrite: goto op_DelayWrite;
+    case Op::Add: goto op_Add;
+    case Op::AddSat: goto op_AddSat;
+    case Op::Sub: goto op_Sub;
+    case Op::SubSat: goto op_SubSat;
+    case Op::And: goto op_And;
+    case Op::Or: goto op_Or;
+    case Op::Shl: goto op_Shl;
+    case Op::Sar: goto op_Sar;
+    case Op::Max: goto op_Max;
+    case Op::Min: goto op_Min;
+    case Op::LoadReg: goto op_LoadReg;
+    case Op::LoadRegInc: goto op_LoadRegInc;
+    case Op::StoreReg: goto op_StoreReg;
+    case Op::StoreRegInc: goto op_StoreRegInc;
+    case Op::IoLoadReg: goto op_IoLoadReg;
+    case Op::IoLoadRegInc: goto op_IoLoadRegInc;
+    case Op::IoStoreReg: goto op_IoStoreReg;
+    case Op::IoStoreRegInc: goto op_IoStoreRegInc;
+    case Op::Biquad: goto op_Biquad;
+    case Op::SarImm: goto op_SarImm;
+    case Op::ShlImm: goto op_ShlImm;
+    case Op::ShrImm: goto op_ShrImm;
+    case Op::PortRead: goto op_PortRead;
+    case Op::PortWrite: goto op_PortWrite;
+    case Op::Mov: goto op_Mov;
+    case Op::MovHighToLow: goto op_MovHighToLow;
+    case Op::MovLowToHigh: goto op_MovLowToHigh;
+    case Op::MovHigh: goto op_MovHigh;
+    case Op::NegSat: goto op_NegSat;
+    case Op::AbsSat: goto op_AbsSat;
+    default: goto op_Invalid;
+    }
+#endif
         op_Nop: NEXT();
         op_Invalid:
             trapped_ = true;
@@ -651,20 +743,16 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
             // r3, r2: y[n-1], y[n-2]; r11: sample pointer (read, filtered, written back).
             for (int i = 0; i < 2; ++i) {
                 const std::uint32_t x = dataLoad(r_[11]);
-                const __int128 acc = static_cast<__int128>(static_cast<std::int64_t>(s32(x)) * s32(r_[10])) +
-                                     static_cast<std::int64_t>(s32(r_[9])) * s32(r_[5]) +
-                                     static_cast<std::int64_t>(s32(r_[8])) * s32(r_[4]) +
-                                     static_cast<std::int64_t>(s32(r_[7])) * s32(r_[3]) +
-                                     static_cast<std::int64_t>(s32(r_[6])) * s32(r_[2]);
-                __int128 y = acc >> dp->shift;
-                if (y < -0x80000000LL)
-                    y = -0x80000000LL;
-                if (y > 0x7FFFFFFF)
-                    y = 0x7FFFFFFF;
+                const auto y = biquadResult({
+                    static_cast<std::int64_t>(s32(x)) * s32(r_[10]),
+                    static_cast<std::int64_t>(s32(r_[9])) * s32(r_[5]),
+                    static_cast<std::int64_t>(s32(r_[8])) * s32(r_[4]),
+                    static_cast<std::int64_t>(s32(r_[7])) * s32(r_[3]),
+                    static_cast<std::int64_t>(s32(r_[6])) * s32(r_[2])}, dp->shift);
                 r_[4] = r_[5];
                 r_[5] = x;
                 r_[2] = r_[3];
-                r_[3] = static_cast<std::uint32_t>(static_cast<std::int64_t>(y));
+                r_[3] = y;
                 const std::uint32_t address = r_[11]++;
                 ++writes_;
                 dataStore(address, r_[3]);
@@ -688,6 +776,7 @@ std::uint64_t DspCore::interpret(std::uint64_t budget, std::uint64_t limit) {
             r_[dp->c] = clampToS32(v < 0 ? -v : v);
             NEXT();
         }
+#undef HYDRA_DISPATCH_JUMP
 #undef NEXT
 #undef DISPATCH
 }

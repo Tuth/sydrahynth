@@ -8,6 +8,12 @@
 
 #include "dsp_core.h"
 
+#if defined(HYDRA_TEST_WINDOWS_ABI) && !defined(_WIN32)
+#define HYDRA_JIT_HOST_ABI __attribute__((ms_abi))
+#else
+#define HYDRA_JIT_HOST_ABI
+#endif
+
 namespace hydra::dsp {
 
 // Translates a DspCore's program to x86-64, a basic block at a time, with the
@@ -36,7 +42,7 @@ public:
 
 private:
     enum Exit : std::uint32_t { kNormal, kIdle, kBudget };
-    using Enter = std::uint32_t (*)(DspCore* core, const void* code, std::uint64_t* executed, std::uint64_t budget);
+    using Enter = std::uint32_t (HYDRA_JIT_HOST_ABI *)(DspCore* core, const void* code, std::uint64_t* executed, std::uint64_t budget);
 
     struct Instruction {
         std::uint32_t pc;

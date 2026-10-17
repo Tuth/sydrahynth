@@ -1,0 +1,5 @@
+# Preserve upstream CRLF context in patches and their required blank-line prefix.
+patches/*.patch -text -whitespace
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf

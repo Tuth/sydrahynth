@@ -1,5 +1,6 @@
 #include "a5pack.h"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -14,7 +15,7 @@ constexpr std::size_t kSectionHeaderSize = 2 * kFieldSize + 4;
 
 std::string fixedString(std::span<const std::uint8_t> field) {
     const auto* begin = reinterpret_cast<const char*>(field.data());
-    return std::string(begin, strnlen(begin, field.size()));
+    return std::string(begin, std::find(begin, begin + field.size(), '\0'));
 }
 
 std::uint32_t readLe32(const std::uint8_t* p) {

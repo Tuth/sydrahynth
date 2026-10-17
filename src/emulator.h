@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -26,7 +27,7 @@ public:
     static constexpr double kSampleRate = 44100.0;
 
     struct Config {
-        std::string firmwarePath;                     // the Hydrasynth Desktop .dat firmware pack
+        std::filesystem::path firmwarePath;           // the Hydrasynth Desktop .dat firmware pack
         std::vector<Machine::Config::FlashBlock> flash;  // e.g. from a saved state
         std::map<std::pair<int, int>, std::int16_t> systemSettings;
         int dspThreads = 4;
@@ -189,7 +190,7 @@ private:
     // Diagnostic (HYDRA_OLED_TRACE): per run chunk, whether the main display
     // was written, run-length encoded (count > 0 active chunks, < 0 idle).
     bool oledTrace_ = false;
-    bool settleDsp_ = false;
+    bool settleDsp_ = true;
     bool bootTrace_ = false;  // HYDRA_BOOT_TRACE
     bool panelTalking_ = false;  // the panel's start screen has ended
     std::array<bool, 256> seenFrameTypes_{};  // HYDRA_DSP_SETTLE: wait for the DSP side at every run chunk (experiment)

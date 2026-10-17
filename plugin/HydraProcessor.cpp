@@ -10,8 +10,15 @@ constexpr int kStateVersion = 1;
 
 juce::PropertiesFile::Options settingsOptions() {
     juce::PropertiesFile::Options options;
-    options.applicationName = "sydrahynth";
+#if JUCE_WINDOWS
+    // JUCE's standalone wrapper already owns Sydrahynth/Sydrahynth.settings.
+    // Windows paths ignore case, so reserve distinct processor filenames too.
+    options.applicationName = juce::JUCEApplicationBase::isStandaloneApp() ? "sydrahynth-standalone" : "sydrahynth-vst3";
+    options.folderName = "sydrahynth";
+#else
+    options.applicationName = juce::JUCEApplicationBase::isStandaloneApp() ? "sydrahynth-standalone" : "sydrahynth";
     options.folderName = ".config/sydrahynth";  // on Linux relative to the home directory
+#endif
     options.filenameSuffix = "settings";
     options.osxLibrarySubFolder = "Application Support";
     return options;
@@ -57,10 +64,15 @@ juce::File HydraProcessor::firmwareFile() const {
     const juce::String stored = self.settings_.getUserSettings()->getValue("firmware");
     if (stored.isNotEmpty())
         return juce::File(stored);
-    if (const char* fromEnvironment = std::getenv("HYDRA_FIRMWARE"))
-        return juce::File(juce::String(fromEnvironment));
+    const auto fromEnvironment = juce::SystemStats::getEnvironmentVariable("HYDRA_FIRMWARE", {});
+    if (fromEnvironment.isNotEmpty())
+        return juce::File(fromEnvironment);
     const juce::File folder =
+#if JUCE_WINDOWS
+        juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("sydrahynth/Firmware");
+#else
         juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile(".local/share/sydrahynth");
+#endif
     const auto found = folder.findChildFiles(juce::File::findFiles, false, "*.dat");
     return found.isEmpty() ? juce::File() : found.getFirst();
 }
@@ -79,7 +91,7 @@ void HydraProcessor::restartEmulator(std::vector<hydra::Machine::Config::FlashBl
     const std::lock_guard life(lifeMutex_);
     pendingFlash_ = flash;
     hydra::Emulator::Config config;
-    config.firmwarePath = firmwareFile().getFullPathName().toStdString();
+    config.firmwarePath = std::filesystem::u8path(firmwareFile().getFullPathName().toStdString());
     config.flash = std::move(flash);
     config.systemSettings = initialSystemSettings();
     config.targetFill = targetFill();

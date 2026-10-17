@@ -1,6 +1,8 @@
-# Sydrahynth
+# Sydrahynth — Windows x64 fork
 
-Sydrahynth is a Linux plugin that emulates ASM's Hydrasynth Desktop. It runs ASM's own
+Windows port of [systemfreund/sydrahynth](https://github.com/systemfreund/sydrahynth), the original emulator by systemfreund. Test2 standalone is confirmed working on Windows (Ryzen 9 5900X); native VST3 DAW validation is pending.
+
+Sydrahynth is a Linux and Windows x64 plugin that emulates ASM's Hydrasynth Desktop. It runs ASM's own
 Hydrasynth Desktop firmware on an emulated main board. No firmware is included:
 you supply `Hydrasynth_Desktop_Firmware_2.2.0.dat` from ASM's firmware pack.
 
@@ -14,6 +16,71 @@ This builds the tools and, with JUCE fetched, the plugin as VST3, LV2 and a
 standalone app in `build/Sydrahynth_artefacts/<config>/`. Install by
 copying `VST3/Sydrahynth.vst3` to `~/.vst3/` and `LV2/Sydrahynth.lv2` to
 `~/.lv2/`.
+
+## Windows x64 build and installation
+
+Windows 10/11 x64 port: VST3 and standalone, LLVM-MinGW UCRT x86_64 toolchain. Use Python
+3.12+, Git, CMake 3.25+ and Ninja. With LLVM-MinGW extracted and its `bin` on PATH:
+
+```powershell
+$env:LLVM_MINGW_ROOT = 'C:/tools/llvm-mingw'
+powershell -ExecutionPolicy Bypass -File scripts/build-win64.ps1
+```
+
+The dependency script fetches exact Dynarmic and JUCE commits and verifies the
+Boost 1.86.0 archive SHA-256. It preserves unexpected existing checkouts instead
+of resetting them. No synthesizer firmware or banks are downloaded or bundled.
+The toolchain used for this port is LLVM-MinGW **20261006 UCRT x86_64**; MSVC compilation
+has not been validated. A Linux-to-Windows cross-build uses the same commands:
+
+```sh
+python3 scripts/fetch-deps.py
+export LLVM_MINGW_ROOT=/path/to/llvm-mingw
+cmake -S . -B build/win64 -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+  -DDYNARMIC_USE_PRECOMPILED_HEADERS=OFF
+cmake --build build/win64 --parallel 4
+```
+
+A cross-build also needs native JUCE helper build dependencies (X11 development
+headers, freetype/fontconfig and ALSA on Linux). Copy the **whole**
+`build/win64/Sydrahynth_artefacts/Release/VST3/Sydrahynth.vst3` directory to
+`C:/Program Files/Common Files/VST3/`. The standalone `.exe` is in the adjacent
+`Standalone` directory. The static runtime build needs no LLVM-MinGW DLLs.
+
+Choose your own `Hydrasynth_Desktop_Firmware_2.2.0.dat` with the GUI firmware
+button. Alternatively place it under `%APPDATA%/sydrahynth/Firmware/` or set
+`HYDRA_FIRMWARE` to its full path. Load your `.hydra` bank with **Load bank...**.
+Firmware contains no factory patches. Select the audio/MIDI device from the
+standalone audio settings; begin with 44.1 kHz and a 256-frame device buffer,
+then lower it as your audio driver permits. The existing 6/12/23/46 ms emulator
+latency selector remains available.
+
+Standalone preferences use `%APPDATA%/sydrahynth/sydrahynth-standalone.settings`;
+plugin preferences use `%APPDATA%/sydrahynth/sydrahynth-vst3.settings`. Firmware paths
+and preferences are therefore independent. Instrument flash/banks remain in the
+saved plugin state. JUCE's standalone audio settings and saved instrument state
+use `%APPDATA%/Sydrahynth/Sydrahynth.settings`, separately from both preference
+files. The standalone includes WASAPI and DirectSound audio backends. Paths with non-ASCII
+characters are passed to the firmware loader as UTF-8 filesystem paths.
+
+`ctest --test-dir build/win64 --output-on-failure` exercises exact filter
+arithmetic and seeded JIT/interpreter comparisons on Windows. On Linux,
+`dsp_windows_abi_test` additionally exercises Windows x64 calling conventions
+and the portable interpreter dispatch. The Linux signal sampler is disabled on
+Windows; use a native profiler there.
+
+`firmware_smoke firmware.dat bank.hydra` exercises boot, an uploaded patch,
+finite nonzero MIDI audio, and flash restore. It waits for emulated frames and
+uses the production upload queue, so it also works on a slow test machine.
+This checks functionality and is not a realtime or audio-driver benchmark.
+
+CPU and DSP now synchronize at the end of the existing 1 ms emulator chunk.
+They still overlap within the chunk. This prevents host scheduling from letting
+CPU time run arbitrarily ahead of DSP time; the supplied bank could otherwise
+produce a near-silent MIDI note in the headless test. No audio buffering is
+added. `HYDRA_DSP_SETTLE=0` restores the old unsynchronized behavior for diagnosis;
+leave it unset for normal use.
 
 ## License
 

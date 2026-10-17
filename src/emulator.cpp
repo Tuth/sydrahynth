@@ -1,4 +1,5 @@
 #include "emulator.h"
+#include <string_view>
 
 #include <algorithm>
 #include <chrono>
@@ -72,7 +73,12 @@ void Emulator::start(const Config& config) {
     panelCaptureHz_ = panelCaptureHz();
     oledTrace_ = std::getenv("HYDRA_OLED_TRACE") != nullptr;
     bootTrace_ = std::getenv("HYDRA_BOOT_TRACE") != nullptr;
-    settleDsp_ = std::getenv("HYDRA_DSP_SETTLE") != nullptr;
+    // Bound CPU/DSP skew to the existing 1 ms run chunk. Without the barrier,
+    // a fast CPU can queue DSP time far ahead and firmware MIDI/voice setup
+    // becomes dependent on host thread scheduling. Both still run in parallel
+    // inside the chunk; this adds no audio buffering.
+    const char* settle = std::getenv("HYDRA_DSP_SETTLE");
+    settleDsp_ = !settle || std::string_view(settle) != "0";
     stop();
     setTargetFill(config.targetFill);
     audioWritten_ = audioRead_ = 0;
